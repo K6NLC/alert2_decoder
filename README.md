@@ -177,7 +177,7 @@ details.
 ## What you need
 
 1. **An FM receiver tuned to your ALERT2 network frequency** — typically in the
-   159–174 MHz VHF band. Either:
+   169–172 MHz VHF band. Either:
    - An **RTL-SDR dongle** (recommended — ~$30, gives the cleanest signal)
    - A **commercial FM radio with discriminator output** (sometimes labeled
      "9600 baud data")

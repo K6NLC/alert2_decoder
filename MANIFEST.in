@@ -1,0 +1,9 @@
+include README.md
+include CHANGELOG.md
+include LICENSE
+recursive-include alert2/templates *.html
+recursive-include docs *.md
+recursive-include tests *.py
+include NOTICE.md
+include REUSE.toml
+recursive-include LICENSES *.txt

@@ -1,0 +1,35 @@
+# Python build/cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+.pytest_cache/
+.venv/
+venv/
+
+# Field data and receiver output -- never commit captures or logs.
+# Use alert2.generator / txcli to make synthetic test vectors instead.
+*.wav
+*.diag
+*.log
+*.csv
+*.jsonl
+*.iq
+*.raw
+captures/
+logs/
+recordings/
+
+# Offline install bundles (contain third-party .deb/.whl files)
+alert2_bundle_*/
+*.tar
+*.tar.gz
+*.zip
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

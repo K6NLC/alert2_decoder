@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<!-- SPDX-FileCopyrightText: 2026 Nicholas Collins (K6NLC) -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Source __SOURCE_ID__ — ALERT2 Decoder</title>
+<style>
+  :root {
+    --bg: #f5f5f4;
+    --panel: #ffffff;
+    --border: #d6d3d1;
+    --text: #1c1917;
+    --text-dim: #57534e;
+    --text-faint: #a8a29e;
+    --accent: #0369a1;
+    --good: #15803d;
+    --warn: #b45309;
+    --bad: #b91c1c;
+    --row-hover: #f5f5f4;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.4;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+  header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  header a:hover { text-decoration: underline; }
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .summary .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .summary .card .label {
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .summary .card .value {
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+  .panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin: 16px 0 8px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .chart-container {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 16px;
+  }
+  svg.snr-chart { width: 100%; height: 180px; display: block; }
+  table.history {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  table.history th {
+    background: #fafaf9;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  table.history td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.history tr:last-child td { border-bottom: none; }
+  table.history tr.row-highlight td { background: #fef9c3; transition: background 0.3s; }
+  .badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    margin-left: 4px;
+  }
+  .badge-trunc { background: #fee2e2; color: var(--bad); }
+  .badge-rs { background: #fef3c7; color: var(--warn); }
+  .empty {
+    color: var(--text-faint);
+    text-align: center;
+    padding: 40px 20px;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Back to all sources</a>
+  <h1>Source __SOURCE_ID__</h1>
+</header>
+
+<main>
+  <div class="summary" id="summary"></div>
+
+  <div class="panel-title">Signal quality over time</div>
+  <div class="chart-container">
+    <svg class="snr-chart" id="snr-chart" preserveAspectRatio="none"></svg>
+    <div style="text-align:center; color: var(--text-faint); font-size: 12px;">
+      Most recent <span id="hist-count">0</span> packets · click points for details
+    </div>
+  </div>
+
+  <div class="panel-title">Packet history (most recent first)</div>
+  <table class="history">
+    <thead>
+      <tr><th>Time</th><th>SNR</th><th>MER</th><th>HD</th><th>RS</th><th>PDU ID</th><th>TS</th><th>Sensor data</th></tr>
+    </thead>
+    <tbody id="history-rows"></tbody>
+  </table>
+</main>
+
+<script>
+(function() {
+  const SRC = __SOURCE_ID__;
+  const POLL_INTERVAL = __POLL_INTERVAL__;
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function fmt(v, d) { return v == null ? d : v; }
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const t = new Date(iso);
+    return t.toTimeString().slice(0, 8);
+  }
+  function summarize(p) {
+    if (p.srp_summary) return p.srp_summary.replace(/^SRP(\[[^\]]+\])*:\s*/, '');
+    return '';
+  }
+
+  function renderSummary(s) {
+    if (!s) { document.getElementById('summary').innerHTML =
+      '<div class="card"><div class="label">No data yet</div></div>'; return; }
+    const cards = [
+      ['Packets', s.count],
+      ['Avg SNR', s.snr_avg != null ? s.snr_avg.toFixed(1) + ' dB' : '—'],
+      ['Min SNR', s.snr_min != null ? s.snr_min.toFixed(1) + ' dB' : '—'],
+      ['Max SNR', s.snr_max != null ? s.snr_max.toFixed(1) + ' dB' : '—'],
+      ['Truncated', s.truncated_count],
+      ['RS-corrected', s.rs_corr_count],
+      ['Last PDU ID', s.last_pdu_id == null ? 'disabled' : s.last_pdu_id],
+    ];
+    document.getElementById('summary').innerHTML = cards.map(([l, v]) =>
+      `<div class="card"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
+  }
+
+  function renderChart(history) {
+    const svg = document.getElementById('snr-chart');
+    document.getElementById('hist-count').textContent = history.length;
+    if (history.length === 0) {
+      svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#a8a29e" font-size="13">No SNR data yet</text>';
+      return;
+    }
+    const W = svg.clientWidth || 800;
+    const H = 180;
+    const PAD = { l: 40, r: 12, t: 16, b: 24 };
+    const plotW = W - PAD.l - PAD.r;
+    const plotH = H - PAD.t - PAD.b;
+
+    const C_SNR = '#0369a1', C_MER = '#7c3aed';
+    const C_TRUNC = '#b91c1c', C_RS = '#b45309';
+
+    const t0 = history[0].rx_time_unix;
+    const t1 = history[history.length - 1].rx_time_unix;
+    const tspan = Math.max(1, t1 - t0);
+    // Two series, each plotted only where it exists. SNR is absent on
+    // ~10% of packets (no pre-burst audio) and on every burst-mode packet;
+    // MER is absent only on the hard-decision path. Neither may be assumed
+    // non-null — doing so previously threw inside this function and, because
+    // update() swallows exceptions, silently killed the chart AND the
+    // history table below it.
+    const snrPts = history.filter(h => h.snr_db != null);
+    const merPts = history.filter(h => h.mer_db != null);
+    const vals = snrPts.map(h => h.snr_db).concat(merPts.map(h => h.mer_db));
+    if (vals.length === 0) {
+      svg.innerHTML = '';
+      return;
+    }
+    let smin = Math.min(...vals), smax = Math.max(...vals);
+    if (smax - smin < 4) {
+      const c = (smin + smax) / 2;
+      smin = c - 2; smax = c + 2;
+    } else {
+      smin -= 0.5; smax += 0.5;
+    }
+    const sspan = smax - smin;
+
+    function xpx(t) { return PAD.l + (t - t0) / tspan * plotW; }
+    function ypx(s) { return PAD.t + (1 - (s - smin) / sspan) * plotH; }
+
+    function series(points, key, stroke) {
+      if (points.length === 0) return '';
+      const pts = points.map(h =>
+        `${xpx(h.rx_time_unix).toFixed(1)},${ypx(h[key]).toFixed(1)}`);
+      return `<polyline points="${pts.join(' ')}" fill="none" stroke="${stroke}" stroke-width="1.5" opacity="0.55"/>`;
+    }
+    const polyline = series(snrPts, 'snr_db', C_SNR)
+                   + series(merPts, 'mer_db', C_MER);
+
+    // TWO encodings that must not collide:
+    //   FILL   = which metric (blue SNR / purple MER) — matches the legend
+    //   RING   = packet status (red TRUNCATED, amber RS-corrected)
+    // An earlier version overwrote the fill with the status colour, so a red
+    // dot meant "truncated" while the legend said red meant SNR. It also
+    // drew only ONE dot per packet, preferring MER, which left SNR with a
+    // bare polyline and no points — reading as "SNR isn't graphed at all".
+    // Every packet now contributes a dot to EVERY series it has a value for.
+    function dot(h, key, fill) {
+      if (h[key] == null) return '';
+      const x = xpx(h.rx_time_unix), y = ypx(h[key]);
+      let ring = '', rw = 0;
+      if (h.truncated) { ring = C_TRUNC; rw = 2; }
+      else if (h.rs_corrections > 0) { ring = C_RS; rw = 2; }
+      const tt = new Date(h.rx_time_unix * 1000).toTimeString().slice(0, 8);
+      const parts = [];
+      parts.push(h.snr_db != null ? 'SNR ' + h.snr_db.toFixed(1) + ' dB'
+                                  : 'SNR —');
+      if (h.mer_db != null) parts.push('MER ' + h.mer_db.toFixed(1) + ' dB');
+      if (h.rs_corrections) parts.push('RS=' + h.rs_corrections);
+      if (h.truncated) parts.push('TRUNCATED');
+      return `<circle class="snr-pt" data-rxtime="${h.rx_time_unix}" `
+           + `cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${fill}"`
+           + (rw ? ` stroke="${ring}" stroke-width="${rw}"` : '')
+           + ` style="cursor:pointer"><title>${tt}: ${parts.join(', ')}`
+           + ` — click for details</title></circle>`;
+    }
+    const dots = history.map(h => dot(h, 'snr_db', C_SNR)
+                                + dot(h, 'mer_db', C_MER)).join('');
+    // Y-axis labels
+    const yticks = [smin, (smin + smax) / 2, smax].map(v => {
+      const y = ypx(v);
+      return `<text x="${PAD.l - 4}" y="${y + 4}" text-anchor="end" fill="#a8a29e" font-size="10" font-family="monospace">${v.toFixed(0)}</text>`;
+    }).join('');
+    // Y-axis line
+    const yaxis = `<line x1="${PAD.l}" y1="${PAD.t}" x2="${PAD.l}" y2="${PAD.t + plotH}" stroke="#d6d3d1"/>`;
+    // X-axis line
+    const xaxis = `<line x1="${PAD.l}" y1="${PAD.t + plotH}" x2="${PAD.l + plotW}" y2="${PAD.t + plotH}" stroke="#d6d3d1"/>`;
+    // X-axis labels (start, mid, end times)
+    const xticks = [0, 0.5, 1].map(f => {
+      const t = t0 + tspan * f;
+      const x = PAD.l + plotW * f;
+      const tstr = new Date(t * 1000).toTimeString().slice(0, 5);
+      return `<text x="${x}" y="${H - 6}" text-anchor="middle" fill="#a8a29e" font-size="10" font-family="monospace">${tstr}</text>`;
+    }).join('');
+    // Y-axis label
+    // Legend: fill = metric, ring = status. Only shows a series that has
+    // data, so a --mer-mode off site does not advertise an empty MER series.
+    let lx = PAD.l, leg = `<text x="${lx}" y="${PAD.t - 5}" fill="#a8a29e" font-size="10" font-family="monospace">dB</text>`;
+    lx += 22;
+    function swatch(label, fill, ring) {
+      const g = `<circle cx="${lx + 4}" cy="${PAD.t - 8}" r="3.5" fill="${fill}"`
+              + (ring ? ` stroke="${ring}" stroke-width="2"` : '') + `/>`
+              + `<text x="${lx + 12}" y="${PAD.t - 5}" fill="#78716c" font-size="10">${label}</text>`;
+      lx += 22 + label.length * 5.6;
+      return g;
+    }
+    if (snrPts.length) leg += swatch('SNR', C_SNR, null);
+    if (merPts.length) leg += swatch('MER', C_MER, null);
+    if (history.some(h => h.rs_corrections > 0)) leg += swatch('RS', '#fff', C_RS);
+    if (history.some(h => h.truncated)) leg += swatch('trunc', '#fff', C_TRUNC);
+    const ylabel = leg;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = ylabel + yaxis + xaxis + yticks + xticks + polyline + dots;
+
+    // Wire each point to its history-table row: click highlights and
+    // scrolls to the matching row (the detail the caption promises).
+    svg.querySelectorAll('.snr-pt').forEach(pt => {
+      pt.addEventListener('click', () => {
+        const rx = pt.getAttribute('data-rxtime');
+        const row = document.querySelector(`#history-rows tr[data-rxtime="${rx}"]`);
+        document.querySelectorAll('#history-rows tr.row-highlight')
+          .forEach(r => r.classList.remove('row-highlight'));
+        if (row) {
+          row.classList.add('row-highlight');
+          row.scrollIntoView({behavior: 'smooth', block: 'center'});
+        }
+      });
+    });
+  }
+
+  function renderHistory(packets) {
+    const tbody = document.getElementById('history-rows');
+    if (packets.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty">No packets received from this source yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = packets.map(p => {
+      const trunc = p.truncated ? '<span class="badge badge-trunc">TRUNC</span>' : '';
+      const rs = p.rs_corrections > 0 ? `<span class="badge badge-rs">${p.rs_corrections}</span>` : '0';
+      return `<tr data-rxtime="${p.rx_time_unix}">
+        <td class="mono">${fmtTime(p.rx_time_iso)}</td>
+        <td class="mono">${p.snr_db != null ? p.snr_db.toFixed(1) : '—'}</td>
+        <td class="mono">${p.mer_db != null ? p.mer_db.toFixed(1) : '—'}</td>
+        <td class="mono">${fmt(p.framesync_hd, '?')}</td>
+        <td class="mono">${rs}</td>
+        <td class="mono">${p.app_pdu_id == null ? '—' : p.app_pdu_id}</td>
+        <td class="mono">${fmt(p.srp_ts, '—')}</td>
+        <td>${trunc} ${escapeHtml(summarize(p))}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function update() {
+    try {
+      const resp = await fetch(`/api/source/${SRC}`);
+      const data = await resp.json();
+      renderSummary(data.summary);
+      // Each section renders independently: a failure in one must not take
+      // the others down with it. A null field in the chart data previously
+      // threw here and silently blanked the history table too.
+      try { renderChart(data.history || []); }
+      catch (e) { console.error('chart render failed:', e); }
+      try { renderHistory(data.packets || []); }
+      catch (e) { console.error('history render failed:', e); }
+    } catch (e) { console.error('source update failed:', e); }
+  }
+
+  update();
+  setInterval(update, POLL_INTERVAL);
+})();
+</script>
+</body>
+</html>

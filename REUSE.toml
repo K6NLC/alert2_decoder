@@ -1,0 +1,9 @@
+# Licensing for files that cannot carry an inline SPDX header
+# (Markdown docs, plain-text manifests). Checked with `reuse lint`.
+version = 1
+
+[[annotations]]
+path = ["README.md", "CHANGELOG.md", "NOTICE.md", "docs/**", "requirements.txt", "MANIFEST.in", ".gitignore", "REUSE.toml"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Nicholas Collins (K6NLC)"
+SPDX-License-Identifier = "GPL-3.0-or-later"

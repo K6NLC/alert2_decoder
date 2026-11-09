@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.9.1rc47 — actions, timers, APRS, I/Q input
+
+New tools and inputs since the first public release (rc38). Detailed
+per-rc notes for rc39–rc46 were not kept in this file.
+
+- **`alert2-actions`** — runs shell commands, HTTP requests and e-mail
+  when a gauge crosses a threshold (rules with hysteresis and debounce),
+  on timers, or by hand from a keyboard console. See `docs/ACTIONS.md`.
+- **`alert2-aprs`** — posts configured gauges to APRS-IS / aprs.fi under
+  tactical callsigns, with stage as telemetry. See `docs/APRS.md`.
+- **I/Q input** — decode raw SDR captures (GQRX recordings and other
+  formats) directly. See `docs/IQ_INPUT.md`.
+- Credentials (APRS passcode, SMTP password) come from the config file or
+  the `APRS_PASSCODE` / `ALERT2_SMTP_PASSWORD` environment variables;
+  `aprs.ini`, `actions.ini` and the actions state file are git-ignored.
+
+### Receive-only build support (carried forward from rc38+, for the Android app)
+
+No change to decode behaviour on a desktop install: SciPy is still used
+when present.
+
+- **CLI refactor:** `build_parser()`, `resolve_args()` and
+  `stream_kwargs_from_args()` split out of `main()` / `run_stdin_mode()`,
+  so other front ends can run exactly the `--stdin` configuration,
+  CLI defaults included.
+- **Optional iterative/SOVA:** `decoder.py` imports `iterative` and
+  `iterative_sova` only if present; `iterative='demod'|'sova'` raises a
+  clear error in a build without them.
+- **SciPy optional on the receive path:** `demod.resample_poly_np()`, a
+  NumPy equivalent of `scipy.signal.resample_poly` (same Kaiser FIR,
+  length and alignment; agrees to float rounding — 1e-12 relative in
+  float64, 2e-7 absolute in float32), used only when SciPy is absent or
+  `ALERT2_NUMPY_RESAMPLE=1`. The hum filter and FM-discriminate input
+  options still need SciPy and say so. `decode_wav()` falls back to the
+  stdlib `wave` module.
+- **libfec loader:** honours `ALERT2_LIBFEC` (path or name) before the
+  system names.
+- **Tests:** `tests/test_receive_only_build.py` (resampler equivalence,
+  import without SciPy/SOVA/iterative, CLI kwargs mapping);
+  `test_chunk_overlap.py` now finds libfec the same way the decoder does.
+
 ## v0.9.1rc9 (2026-06-13)
 
 Multi-PDU bundling indicator in the web UI detail panel.

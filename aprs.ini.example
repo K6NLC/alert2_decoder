@@ -1,0 +1,42 @@
+; alert2-aprs configuration — copy to aprs.ini and edit.
+;   alert2-aprs --config aprs.ini --check      validate and list sites
+;   alert2-aprs --config aprs.ini --dry-run    print APRS lines, send nothing
+;   alert2-aprs --config aprs.ini              live
+; The decoder feeds it with:  alert2-decode ... --udp-emit 127.0.0.1:9998
+
+[aprs]
+server       = rotate.aprs2.net:14580
+login        = N0CALL-10          ; your call-SSID; used for the APRS-IS login only
+; passcode   = 12345              ; or set the APRS_PASSCODE environment variable
+tocall       = APZA2T             ; experimental tocall, "ALERT2" — leave as is
+listen       = 127.0.0.1:9998     ; must match the decoder's --udp-emit
+min_interval = 300                ; seconds, per site; never post more often than this
+defs_every   = 10                 ; resend PARM/UNIT/EQNS/BITS every N telemetry frames
+telemetry_format = raw            ; raw: the decoder's values go into the telemetry channels
+                                  ;      verbatim (9.11 ft stays 9.11) — aprs.fi reads them directly.
+                                  ; counts: spec-pure 0..telemetry_max integers scaled by EQNS;
+                                  ;      needs stage_range per site. Only for consumers that
+                                  ;      reject decimals.
+telemetry_max = 255               ; counts mode only
+call_prefix  = AL2                ; tactical call = prefix + site id (AL2735, AL2720, ...)
+
+; One section per gauge. The header number is the ALERT2 source id.
+; Sites that are not listed are ignored, so bring them up one at a time.
+
+[site 735]
+name        = Arroyo Grande Ck    ; shown in the BITS line (23 chars max)
+lat         = 35.1213             ; decimal degrees, south/west negative
+lon         = -120.5789
+symbol      = /w                  ; APRS symbol table + code. Keep /w (water): a weather symbol (_)
+                                  ; makes aprs.fi parse the comment as wx fields and hide it
+stage       = 7                   ; sensor id carrying stage (default 7); "none" if the site has no stage
+stage_units = ft                  ; ft or m, as the site reports it
+; stage_range = 0,300             ; counts mode only: range the channel spans; resolution (hi-lo)/telemetry_max
+battery     = 8                   ; sensor id for battery voltage (default 8)
+; comment   =                     ; optional text appended to every position packet
+
+[site 720]
+; call      = AGCRK               ; override the tactical call (<=6 alnum, optional -0..15)
+name        = Site 720
+lat         = 35.30
+lon         = -120.66

@@ -33,3 +33,11 @@ alert2_bundle_*/
 .idea/
 *.swp
 .DS_Store
+
+# Real configs hold credentials (APRS passcode, SMTP/camera passwords).
+# Only the *.ini.example files belong in the repository.
+aprs.ini
+actions.ini
+*.ini
+!*.ini.example
+*.state

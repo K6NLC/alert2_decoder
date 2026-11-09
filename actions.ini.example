@@ -1,0 +1,104 @@
+; alert2-actions configuration — copy to actions.ini and edit.
+;   alert2-actions --config actions.ini --check         validate, list blocks and rules
+;   alert2-actions --config actions.ini --dry-run       log what would run, run nothing
+;   alert2-actions --config actions.ini --fire cam_high run one block by hand, exit
+;   alert2-actions --config actions.ini                 live, with keyboard console
+;   alert2-actions --config actions.ini --no-console    live, as a service
+; The decoder feeds it with:  alert2-decode ... --udp-emit 127.0.0.1:9997
+; (a second --udp-emit, or one per consumer, is fine; it is fire-and-forget)
+
+[actions]
+listen     = 127.0.0.1:9997
+state_file = alert2-actions.state   ; rule states survive a restart
+; SMTP for mail= steps. Gmail: smtp.gmail.com 587, user = full address,
+; password = a 16-char App Password (Google account -> Security -> 2-Step
+; Verification -> App passwords), not the account password.
+smtp_host     = smtp.gmail.com
+smtp_port     = 587
+smtp_user     = you@gmail.com
+; smtp_password = xxxx xxxx xxxx xxxx   ; or the ALERT2_SMTP_PASSWORD environment variable
+smtp_from     = you@gmail.com
+
+; ---- blocks: named lists of things to do, in order -----------------------
+; run  = shell command (sh -c). http = GET|POST url [auth=user:pass] [digest] [insecure] [body=...]
+; mail = to@addr[,more] "subject" "body"   (subject/body optional; ${ALERT2_*} expands)
+; wait = 5   (seconds; 30s, 2m, 1h also work) — pause before the next step
+;        insecure = accept the device's self-signed / weak-key TLS certificate (IP cameras)
+; Every step sees the event in its environment:
+;   ALERT2_RULE ALERT2_SITE ALERT2_SENSOR ALERT2_VALUE ALERT2_EVENT(enter|exit|stale|manual) ALERT2_TIME
+; ${ALERT2_VALUE} etc. are also substituted inside http URLs.
+
+[block cam_high]
+key  = h                             ; console hotkey
+; Bosch cameras take RCP+ commands over HTTP with digest auth; the exact
+; command/payload for "switch recording profile" comes from the camera's
+; RCP+ reference or by watching Configuration Manager. Example shape:
+http = GET https://10.0.0.5/rcp.xml?command=0x0a1e&type=T_DWORD&direction=WRITE&num=1&payload=2 auth=service:PASSWORD digest insecure
+run  = logger -t alert2 "lagoon HIGH: ${ALERT2_VALUE} ft, camera to flood profile"
+
+[block cam_normal]
+key  = n
+http = GET https://10.0.0.5/rcp.xml?command=0x0a1e&type=T_DWORD&direction=WRITE&num=1&payload=1 auth=service:PASSWORD digest insecure
+run  = logger -t alert2 "lagoon normal: ${ALERT2_VALUE} ft"
+
+[block notify]
+key  = m
+mail = you@example.com,5551234567@vtext.com "ALERT2 ${ALERT2_RULE} ${ALERT2_EVENT}" "Site ${ALERT2_SITE} stage ${ALERT2_VALUE} ft (${ALERT2_EVENT})"
+stop_on_error = no
+timeout = 30
+
+[block ir_still]                     ; sequence with pauses: IR on, settle, snapshot, IR off
+key  = i
+http = GET https://10.0.0.5/rcp.xml?command=0x...IR_ON... auth=service:PASSWORD digest insecure
+wait = 3
+run  = curl -sk --digest -u service:PASSWORD -o /var/alert2/snap-$(date +%%Y%%m%%d-%%H%%M%%S).jpg https://10.0.0.5/snap.jpg
+wait = 1
+http = GET https://10.0.0.5/rcp.xml?command=0x...IR_OFF... auth=service:PASSWORD digest insecure
+
+; ---- timers: run a block on an interval ----------------------------------
+; every = 10m (or seconds, 30s, 1h); block = which block.
+; while_active = RULE runs it only while that rule is ACTIVE (while_normal: the
+; reverse). immediate = yes also fires the moment it becomes eligible.
+
+[timer ir_every_10min]
+every        = 10m
+block        = ir_still
+while_active = lagoon_high
+immediate    = yes
+
+[timer daily_heartbeat]
+every = 24h
+block = notify
+
+; ---- rules: when to fire them --------------------------------------------
+; NORMAL -> ACTIVE when value >= above (debounce consecutive reports),
+; ACTIVE -> NORMAL when value <= below.  below defaults to above.
+; Several rules may watch the same site; a block may be used by many rules.
+
+[rule lagoon_high]
+site     = 769
+sensor   = 7                          ; stage
+above    = 12.0
+below    = 10.5                       ; hysteresis: stays ACTIVE until this
+debounce = 2                          ; two consecutive reports past the line
+on_enter = cam_high, notify
+on_exit  = cam_normal, notify
+
+[rule lagoon_flood]                   ; a second, higher line on the same site
+site     = 769
+above    = 15.0
+below    = 14.0
+on_enter = notify
+
+[rule lagoon_silent]                  ; no report for an hour -> tell someone
+site     = 769
+above    = 1e9                        ; never enters on value; stale only
+stale    = 3600
+on_stale = notify
+
+[rule reservoir_drawdown]             ; falling-edge rule
+site      = 787
+direction = falling
+under     = 1250.0                    ; enter ACTIVE when value <= under
+over      = 1255.0                    ; back to NORMAL when value >= over
+on_enter  = notify

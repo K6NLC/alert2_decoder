@@ -9,7 +9,7 @@ with open('README.md', 'r') as f:
 
 setup(
     name='alert2',
-    version='0.9.1rc38',
+    version='0.9.1rc47',
     description='Pure-Python decoder for the ALERT2 hydrologic radio protocol',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -17,7 +17,7 @@ setup(
     license='GPL-3.0-or-later',
     packages=find_packages(),
     package_data={
-        'alert2': ['templates/*.html'],
+        'alert2': ['templates/*.html', 'aprs.ini.example', 'actions.ini.example'],
     },
     include_package_data=True,
     install_requires=[
@@ -42,6 +42,8 @@ setup(
             'alert2-decode = alert2.cli:main',
             'alert2-tx = alert2.txcli:main',
             'alert2-txconsole = alert2.txconsole:main',
+            'alert2-aprs = alert2.aprs:main',
+            'alert2-actions = alert2.actions:main',
         ],
     },
 )

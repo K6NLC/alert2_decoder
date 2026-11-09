@@ -12,6 +12,7 @@ Three stages, applied in this order on the receive side:
 """
 import ctypes
 import ctypes.util
+import os
 
 try:                      # numpy powers the vectorized soft Viterbi.
     import numpy as np    # fec.py is otherwise numpy-free by design
@@ -107,17 +108,22 @@ def _load_libfec():
     global _libfec
     if _libfec is not None:
         return _libfec
-    try:
-        _libfec = ctypes.CDLL("libfec.so.0")
-    except OSError:
+    # ALERT2_LIBFEC: explicit path (or name) to load first, e.g. a bundled
+    # copy. On Android the app calls System.loadLibrary("fec") before
+    # Python starts, so the bare name below resolves to the APK's library.
+    candidates = [os.environ.get("ALERT2_LIBFEC"), "libfec.so.0", "libfec.so"]
+    for name in filter(None, candidates):
         try:
-            _libfec = ctypes.CDLL("libfec.so")
+            _libfec = ctypes.CDLL(name)
+            break
         except OSError:
-            raise RuntimeError(
-                "libfec not found. Install with: "
-                "sudo apt install libfec-dev (Linux) or build from "
-                "http://www.ka9q.net/code/fec/"
-            )
+            continue
+    else:
+        raise RuntimeError(
+            "libfec not found. Install with: "
+            "sudo apt install libfec-dev (Linux) or build from "
+            "http://www.ka9q.net/code/fec/"
+        )
     _libfec.init_rs_int.argtypes = [ctypes.c_int] * 6
     _libfec.init_rs_int.restype = ctypes.c_void_p
     _libfec.decode_rs_int.argtypes = [ctypes.c_void_p,

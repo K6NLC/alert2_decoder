@@ -36,6 +36,19 @@ from .output import (
 )
 
 
+def _parse_freq(text) -> float:
+    """'170.2625M', '170262500', '170.2625e6', '171850k' -> Hz."""
+    t = str(text).strip().lower().replace('hz', '')
+    mult = 1.0
+    if t.endswith('m'):
+        mult, t = 1e6, t[:-1]
+    elif t.endswith('k'):
+        mult, t = 1e3, t[:-1]
+    elif t.endswith('g'):
+        mult, t = 1e9, t[:-1]
+    return float(t) * mult
+
+
 def _parse_fec_modes(text) -> list:
     """'0,1,2' -> [0, 1, 2]; validates against the modes the spec defines."""
     if isinstance(text, (list, tuple)):
@@ -106,17 +119,20 @@ def build_outputs(args):
     # Decoder emits each packet as one JSON UDP datagram, fire-and-forget.
     if args.udp_emit:
         from .output import UdpEmitOutput
-        try:
-            host, port_str = args.udp_emit.rsplit(':', 1)
-            port = int(port_str)
-        except (ValueError, AttributeError):
-            print(f"ERROR: --udp-emit value '{args.udp_emit}' must be HOST:PORT",
-                   file=sys.stderr)
-            sys.exit(1)
-        if not host:
-            host = '127.0.0.1'
-        outputs.append(UdpEmitOutput(host, port))
-        print(f"UDP emit to {host}:{port}", file=sys.stderr)
+        # May be given more than once: one consumer per address
+        # (alert2_forwarder, alert2-aprs, alert2-actions ...).
+        for spec in args.udp_emit:
+            try:
+                host, port_str = spec.rsplit(':', 1)
+                port = int(port_str)
+            except (ValueError, AttributeError):
+                print(f"ERROR: --udp-emit value '{spec}' must be HOST:PORT",
+                      file=sys.stderr)
+                sys.exit(1)
+            if not host:
+                host = '127.0.0.1'
+            outputs.append(UdpEmitOutput(host, port))
+            print(f"UDP emit to {host}:{port}", file=sys.stderr)
 
     # Stats always collected (cheap). They print to stderr at session end
     # unless --no-stats is given. Optionally also write JSON file.
@@ -134,7 +150,9 @@ def build_outputs(args):
     return MultiOutput(outputs), stats, web_output
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser (shared with tools that need the exact
+    CLI defaults, e.g. the Android app's config generator)."""
     parser = argparse.ArgumentParser(
         prog='alert2',
         description='ALERT2 hydrologic protocol decoder',
@@ -177,6 +195,29 @@ def main():
     # Decoder tuning
     parser.add_argument('--max-fs-hd', type=int, default=5,
                         help='Max Hamming distance for framesync match (default: 5)')
+    iqg = parser.add_argument_group('I/Q input (raw SDR capture)')
+    iqg.add_argument('--iq', action='store_true',
+                     help='Treat the input file as I/Q samples and FM-'
+                          'demodulate here. Implied for GQRX recorder '
+                          'filenames and .raw/.cu8/.cs8/.cs16/.cf32 files.')
+    iqg.add_argument('--iq-rate', type=int, default=None, metavar='SPS',
+                     help='I/Q sample rate (read from a GQRX filename '
+                          'when present)')
+    iqg.add_argument('--iq-format', default=None,
+                     choices=['fc32', 'cu8', 'cs8', 'cs16', 'wav'],
+                     help='Sample format: fc32 (GQRX), cu8 (rtl_sdr), '
+                          'cs8, cs16, or stereo wav (I=L, Q=R). Inferred '
+                          'from the filename by default.')
+    iqg.add_argument('--iq-center', type=float, default=None, metavar='HZ',
+                     help='Tuned centre frequency in Hz (read from a GQRX '
+                          'filename when present); makes carrier= absolute')
+    iqg.add_argument('--iq-bw', type=float, default=4500.0, metavar='HZ',
+                     help='Channel filter half-width (default 4500 Hz; '
+                          '3500-5500 measured best, 9000 decodes nothing)')
+    iqg.add_argument('--freq', type=_parse_freq, default=None, metavar='HZ',
+                     help='Decode only this absolute frequency (e.g. '
+                          '170.2625M) instead of surveying the capture for '
+                          'bursty channels')
     parser.add_argument('--fec-modes', default='0', metavar='LIST',
                         help='Comma-separated AirLink FEC modes to search for '
                              '(0=k7 r1/2, 1=k9 r2/3, 2=k9 r3/4). Each mode '
@@ -209,12 +250,12 @@ def main():
     parser.add_argument('--diag-file',
                         help='Path for the diagnostic log (implies --diag-mode). '
                              'Default if --diag-mode alone: alert2.diag')
-    parser.add_argument('--udp-emit', metavar='HOST:PORT',
+    parser.add_argument('--udp-emit', metavar='HOST:PORT', action='append',
                         help='Send each decoded packet as a JSON datagram to '
-                             'the specified UDP endpoint. Used to feed an '
-                             'external forwarder process (see alert2_forwarder). '
-                             'Fire-and-forget: decoder does not block on slow '
-                             'or absent consumers. Example: 127.0.0.1:9999')
+                             'this UDP endpoint; repeat for several consumers '
+                             '(alert2_forwarder, alert2-aprs, alert2-actions). '
+                             'Fire-and-forget: the decoder never blocks on a '
+                             'slow or absent consumer. Example: 127.0.0.1:9999')
     parser.add_argument('--rotate-daily', action='store_true',
                         help='Open new log/csv/jsonl files at local midnight')
 
@@ -579,7 +620,20 @@ def main():
                              'hardware. Ignored without --multiphase.')
     parser.add_argument('--version', action='version',
                         version=f'%(prog)s {__version__}')
+    return parser
 
+
+def resolve_args(args):
+    """Post-parse normalisation shared by main() and config tools."""
+    if args.iterative_bool is True:
+        args.iterative = 'demod'
+    elif args.iterative_bool is False:
+        args.iterative = 'off'
+    return args
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
 
     # Device listing is a "print and exit" mode — handle it before any
@@ -591,10 +645,7 @@ def main():
         sys.exit(0)
 
     # Resolve back-compat alias
-    if args.iterative_bool is True:
-        args.iterative = 'demod'
-    elif args.iterative_bool is False:
-        args.iterative = 'off'
+    resolve_args(args)
 
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(level=log_level,
@@ -641,18 +692,86 @@ def main():
             web_server.server_close()
 
 
+def _is_iq_file(args) -> bool:
+    if getattr(args, 'iq', False):
+        return True
+    from .iq import parse_gqrx_name
+    name = (args.wavfile or '').lower()
+    return bool(parse_gqrx_name(name)) or name.endswith(
+        ('.raw', '.cu8', '.cs8', '.cs16', '.cf32', '.fc32', '.iq'))
+
+
 def run_file_mode(args, output, stats):
-    """Decode a single WAV file."""
+    """Decode a single WAV file, or an I/Q capture (--iq / by filename)."""
     import scipy.io.wavfile as wavio
     import numpy as np
 
-    fs, data = wavio.read(args.wavfile)
-    if data.ndim > 1:
-        data = data[:, 0]
-    audio = data.astype(np.float32) / 32768.0
+    _collected = []
+    if _is_iq_file(args):
+        from . import iq as _iq
+        x, fs_iq, center = _iq.read_iq(args.wavfile, args.iq_format,
+                                       args.iq_rate, args.iq_center)
+        x = x - np.mean(x)
+        if args.freq is not None and center is not None:
+            chans = [(float(args.freq) - center, 0.0)]
+        elif args.freq is not None:
+            raise SystemExit("--freq needs the capture centre frequency: "
+                             "use a GQRX filename or --iq-center")
+        else:
+            chans = _iq.survey(x, fs_iq)
+        if not args.quiet:
+            c = f"{center/1e6:.6f} MHz" if center is not None else "unknown"
+            print(f"I/Q: {len(x)/fs_iq:.1f} s at {fs_iq} sps, centre {c}, "
+                  f"{len(chans)} candidate channel(s): "
+                  + ", ".join(f"{o:+.0f} Hz ({sc:.1f} dB)" for o, sc in chans),
+                  file=sys.stderr)
+        for off, score in chans:
+            audio = _iq.iq_to_audio(x, fs_iq, off, args.iq_bw)
+            got = _decode_audio(args, output, stats, audio, _iq.AUDIO_RATE,
+                                iq_ctx=(x, fs_iq, off, args.iq_bw, center))
+            if not args.quiet:
+                print(f"I/Q channel {off:+.0f} Hz: {len(got)} packet(s)",
+                      file=sys.stderr)
+            _collected += got
+    else:
+        fs, data = wavio.read(args.wavfile)
+        if data.ndim > 1:
+            data = data[:, 0]
+        audio = data.astype(np.float32) / 32768.0
+        _collected = _decode_audio(args, output, stats, audio, fs)
 
-    # Demodulate: audio -> bits + info dict (matched filter, timing recovery).
-    # (This call was missing, leaving `bits`/`info` undefined below.)
+    # Best-wins selection, then emit. mode='first' reproduces the
+    # historical first-decode-wins behaviour exactly.
+    from .stream import _select_best_copies, _drop_shadowed_truncations
+    seen = set()
+    count = 0
+    for pkt in _drop_shadowed_truncations(_select_best_copies(
+            _collected, getattr(args, 'phase_dedup', 'best'))):
+        key = (pkt.fec_mode, pkt.raw_payload)
+        if key in seen:
+            continue
+        seen.add(key)
+        count += 1
+        output.emit(pkt)
+
+    output.close()
+
+    if stats is not None:
+        # Print to terminal unless explicitly suppressed
+        if not args.no_stats:
+            stats.print_summary()
+        # Write JSON summary file if requested
+        if args.stats_file:
+            stats.write_summary_file(args.stats_file)
+        # Append summary to log file if requested
+        if args.stats_in_log and args.log_file:
+            _append_stats_to_log(stats, args.log_file)
+
+
+def _decode_audio(args, output, stats, audio, fs, iq_ctx=None):
+    """Run every file-mode decode pass on one audio array and return the
+    collected (not yet deduplicated) packets."""
+    import numpy as np
     from .demod import demodulate
     bits, info = demodulate(audio, fs)
 
@@ -688,9 +807,7 @@ def run_file_mode(args, output, stats):
                   f"(threshold {args.soft_framesync_threshold}).",
                   file=sys.stderr)
 
-    seen = set()
     _collected = []
-    count = 0
     for label, b_use, inv in [
             ('matched-filter', bits, False),
             ('matched-filter-inverted', [1 - b for b in bits], True)]:
@@ -770,30 +887,55 @@ def run_file_mode(args, output, stats):
     elif getattr(args, 'rate_track', False) and not args.quiet:
         print("--rate-track needs --multiphase; ignored.", file=sys.stderr)
 
-    # Best-wins selection, then emit. mode='first' reproduces the
-    # historical first-decode-wins behaviour exactly.
-    from .stream import _select_best_copies
-    for pkt in _select_best_copies(_collected,
-                                   getattr(args, 'phase_dedup', 'best')):
-        key = (pkt.fec_mode, pkt.raw_payload)
-        if key in seen:
-            continue
-        seen.add(key)
-        count += 1
-        output.emit(pkt)
+    # I/Q per-burst carrier refinement (see iq.py): re-channelize each
+    # detected burst on its own carrier and decode again.
+    if iq_ctx is not None:
+        from . import iq as _iq
+        from .burst_detect import detect_bursts
+        from .constants import SAMPLES_PER_BIT
+        x, fs_iq, off, bw, center = iq_ctx
+        for pkt in _collected:
+            d0 = _iq.burst_carrier_offset(audio, fs,
+                                          (pkt.sample_offset - 80) / 4800.0)
+            pkt.carrier_hz = (center + off + d0) if center is not None \
+                else off + d0
+        try:
+            _filt_iq = np.asarray(info['filtered_43k'], dtype=float)
+            _bursts = detect_bursts(_filt_iq, list(range(SAMPLES_PER_BIT)),
+                                    args.max_fs_hd, decoder.fec_modes,
+                                    min_corr=max(args.candidate_gate or 0.0,
+                                                 0.40))
+            n_ref = 0
+            for bc in _bursts:
+                t0 = (bc.abs_sample - 80 * SAMPLES_PER_BIT) / 43200.0
+                d_off = _iq.burst_carrier_offset(audio, fs, t0)
+                if abs(d_off) < 50:
+                    continue
+                a = int(max(0, (t0 - 0.05) * fs_iq))
+                b = int(min(len(x), (t0 + 6.0) * fs_iq))
+                if b - a < int(0.2 * fs_iq):
+                    continue
+                seg = _iq.discriminate(_iq.channelize(
+                    x, fs_iq, off + d_off, bw, start=a, stop=b))
+                _b2, _i2 = demodulate(seg, fs)
+                for pkt in decoder.decode_bits(
+                        _b2, audio_43k=_i2.get('audio_43k'),
+                        bit_phase=_i2.get('best_phase', 0),
+                        soft_samples=_i2.get('soft_samples'),
+                        amplitude_estimate=_i2.get('amplitude_estimate'),
+                        filtered_43k=_i2.get('filtered_43k')):
+                    pkt.decode_path = 'iq-refined'
+                    pkt.carrier_hz = ((center + off + d_off)
+                                      if center is not None else off + d_off)
+                    _collected.append(pkt)
+                    n_ref += 1
+            if not args.quiet:
+                print(f"I/Q refine: {len(_bursts)} bursts, {n_ref} packets "
+                      "on burst-centred carriers.", file=sys.stderr)
+        except Exception as e:
+            logger.warning(f"I/Q burst refinement failed: {e}")
 
-    output.close()
-
-    if stats is not None:
-        # Print to terminal unless explicitly suppressed
-        if not args.no_stats:
-            stats.print_summary()
-        # Write JSON summary file if requested
-        if args.stats_file:
-            stats.write_summary_file(args.stats_file)
-        # Append summary to log file if requested
-        if args.stats_in_log and args.log_file:
-            _append_stats_to_log(stats, args.log_file)
+    return _collected
 
 
 def _append_stats_to_log(stats, log_file_path):
@@ -817,6 +959,48 @@ def _append_stats_to_log(stats, log_file_path):
             f.write(summary_text)
     except Exception as e:
         print(f"Warning: could not append stats to {path}: {e}", file=sys.stderr)
+
+
+def stream_kwargs_from_args(args) -> dict:
+    """Map parsed CLI args to stream_decode() keyword arguments.
+
+    Single source of truth for the --stdin decode configuration, so other
+    front ends (the Android app) run exactly what the CLI runs.
+    """
+    return dict(
+        sample_rate=args.sample_rate,
+        max_framesync_hd=args.max_fs_hd,
+        fec_modes=_parse_fec_modes(args.fec_modes),
+        soft_viterbi=args.soft_viterbi,
+        mer_mode=args.mer_mode,
+        mer_sample=args.mer_sample,
+        timing_probe=args.timing_probe,
+        candidate_gate=args.candidate_gate,
+        phase_select=args.phase_select,
+        rate_track=args.rate_track,
+        rate_track_min_slope=args.rate_track_min_slope,
+        phase_attempts=args.phase_attempts,
+        phase_dedup=args.phase_dedup,
+        burst_all_phases=args.burst_all_phases,
+        burst_phase_count=args.burst_phase_count,
+        soft_framesync=args.soft_framesync,
+        soft_framesync_threshold=args.soft_framesync_threshold,
+        iterative=args.iterative,
+        max_erasures=args.max_erasures,
+        max_rs_corr=args.max_rs_corr,
+        sova_max_fs_hd=args.sova_max_fs_hd,
+        sova_max_rs_corr=args.sova_max_rs_corr,
+        sova_max_rs_corr_per_block=args.sova_max_rs_corr_per_block,
+        eq_retry=args.eq_retry,
+        presync_eq=args.presync_eq,
+        presync_max_fs_hd=args.presync_max_fs_hd,
+        burst_mode=args.burst_mode,
+        phase_block_scan=args.phase_block_scan,
+        multiphase=args.multiphase,
+        phase_candidates=args.phase_candidates,
+        chunk_seconds=args.chunk_seconds,
+        overlap_seconds=args.overlap_seconds,
+    )
 
 
 def run_stdin_mode(args, output, stats):
@@ -854,38 +1038,7 @@ def run_stdin_mode(args, output, stats):
 
     count = 0
     try:
-        for pkt in stream_decode_stdin(sample_rate=args.sample_rate,
-                                         max_framesync_hd=args.max_fs_hd,
-                                         fec_modes=_parse_fec_modes(args.fec_modes),
-                                         soft_viterbi=args.soft_viterbi,
-                            mer_mode=args.mer_mode,
-                            mer_sample=args.mer_sample,
-                            timing_probe=args.timing_probe,
-                            candidate_gate=args.candidate_gate,
-                            phase_select=args.phase_select,
-                            rate_track=args.rate_track,
-                            rate_track_min_slope=args.rate_track_min_slope,
-                            phase_attempts=args.phase_attempts,
-                            phase_dedup=args.phase_dedup,
-                            burst_all_phases=args.burst_all_phases,
-                            burst_phase_count=args.burst_phase_count,
-                                         soft_framesync=args.soft_framesync,
-                                         soft_framesync_threshold=args.soft_framesync_threshold,
-                                         iterative=args.iterative,
-                                         max_erasures=args.max_erasures,
-                                         max_rs_corr=args.max_rs_corr,
-                                         sova_max_fs_hd=args.sova_max_fs_hd,
-                                         sova_max_rs_corr=args.sova_max_rs_corr,
-                                         sova_max_rs_corr_per_block=args.sova_max_rs_corr_per_block,
-                                         eq_retry=args.eq_retry,
-                                         presync_eq=args.presync_eq,
-                                         presync_max_fs_hd=args.presync_max_fs_hd,
-                                         burst_mode=args.burst_mode,
-                                         phase_block_scan=args.phase_block_scan,
-                                         multiphase=args.multiphase,
-                                         phase_candidates=args.phase_candidates,
-                                         chunk_seconds=args.chunk_seconds,
-                                         overlap_seconds=args.overlap_seconds,
+        for pkt in stream_decode_stdin(**stream_kwargs_from_args(args),
                                          health_callback=_health_cb,
                                          health_interval_s=args.health_interval):
             count += 1

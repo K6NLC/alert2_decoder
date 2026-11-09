@@ -4,6 +4,10 @@ include LICENSE
 recursive-include alert2/templates *.html
 recursive-include docs *.md
 recursive-include tests *.py
+include aprs.ini.example
+include alert2/aprs.ini.example
+include actions.ini.example
+include alert2/actions.ini.example
 include NOTICE.md
 include REUSE.toml
 recursive-include LICENSES *.txt

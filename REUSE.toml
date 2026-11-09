@@ -3,7 +3,7 @@
 version = 1
 
 [[annotations]]
-path = ["README.md", "CHANGELOG.md", "NOTICE.md", "docs/**", "requirements.txt", "MANIFEST.in", ".gitignore", "REUSE.toml"]
+path = ["README.md", "CHANGELOG.md", "NOTICE.md", "docs/**", "requirements.txt", "MANIFEST.in", ".gitignore", "REUSE.toml", "pyproject.toml", "**/*.ini.example"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Nicholas Collins (K6NLC)"
 SPDX-License-Identifier = "GPL-3.0-or-later"

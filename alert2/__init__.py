@@ -19,7 +19,7 @@ Basic usage:
         print(p)
 """
 
-__version__ = '0.9.1rc38'  # rc14: off-first SOVA + validated 5/32 gate + honest-partial fallback; rc15: --eq-retry preamble-trained equalizer (unforced RS)
+__version__ = '0.9.1rc47'  # rc14: off-first SOVA + validated 5/32 gate + honest-partial fallback; rc15: --eq-retry preamble-trained equalizer (unforced RS)
 
 from .decoder import decode_wav, Alert2Decoder
 from .types import Alert2Packet, MantHeader, AirLinkHeader

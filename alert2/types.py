@@ -178,6 +178,7 @@ class Alert2Packet:
     # None when the equalizer never trained for this frame.
     mer_act_db: Optional[float] = None         # achieved MER after real eq
     rate_ppm: Optional[float] = None           # symbol-rate error applied by --rate-track (ppm)
+    carrier_hz: Optional[float] = None         # burst carrier (I/Q input): absolute Hz when the centre is known, else offset
     # Per-burst symbol-timing probe (observation only; see timing_probe.py).
     # timing_offset is the fractional sample offset that would have peaked
     # the known-preamble match; timing_gain is how much correlation the

@@ -60,7 +60,8 @@ from .fec import first_block_cc_bits_padded
 PREAMBLE_BITS = 80
 DEFAULT_MIN_SLOPE = 0.002        # samples / symbol (0.022%)
 DEFAULT_WINDOW_SYMBOLS = 60
-DEFAULT_MAX_RESIDUAL = 1.0       # samples, RMS about the linear fit
+DEFAULT_MAX_RESIDUAL = 0.5       # samples, RMS about the linear fit
+DEFAULT_MIN_DRIFT_RATIO = 8.0    # |slope| * span must exceed this x residual
 MAX_RESAMPLE_SYMBOLS = 26000     # spec max frame (1023 B) + margin
 
 
@@ -84,7 +85,8 @@ def eye_phase(seg: 'np.ndarray') -> Tuple[float, float]:
 
 def estimate_slope(filtered: 'np.ndarray', start: int, fec_mode: int = 0,
                    window_symbols: int = DEFAULT_WINDOW_SYMBOLS,
-                   max_residual: float = DEFAULT_MAX_RESIDUAL
+                   max_residual: float = DEFAULT_MAX_RESIDUAL,
+                   min_drift_ratio: float = DEFAULT_MIN_DRIFT_RATIO
                    ) -> Tuple[float, float, int]:
     """Symbol-rate error of the burst beginning at sample `start`.
 
@@ -100,9 +102,15 @@ def estimate_slope(filtered: 'np.ndarray', start: int, fec_mode: int = 0,
     longest field frame (~4000 symbols) is worth about 0.4 sample of
     error, well inside the eye.
 
-    A fit whose residual RMS exceeds `max_residual` samples is not a clean
-    linear drift (weak burst, collision) and returns slope 0 so the
-    caller leaves the fixed grid alone.
+    A fit is accepted only when it is unmistakably a linear drift: RMS
+    residual <= `max_residual` samples AND the total drift over the fitted
+    span is at least `min_drift_ratio` times that residual. Otherwise
+    slope 0 is returned and the caller leaves the fixed grid alone.
+    Measured: real SDR drift fits at residual 0.07-0.18 with ratio >= 15;
+    the QTH's noise-only bursts reach ratio 4.3 at most. The first field
+    day (rc38, residual limit 1.0, no ratio test) let one weak QTH burst
+    (MER 8 dB) through at a fictitious -738 ppm, which produced a
+    truncated copy of a frame already decoded complete.
     """
     W = window_symbols * SPB
     n_win = (PREAMBLE_BITS + first_block_cc_bits_padded(fec_mode)) \
@@ -120,7 +128,9 @@ def estimate_slope(filtered: 'np.ndarray', start: int, fec_mode: int = 0,
     x = np.arange(len(u)) * window_symbols + window_symbols / 2.0
     slope, icpt = np.polyfit(x, u, 1)
     resid = u - (slope * x + icpt)
-    if float(np.sqrt(np.mean(resid ** 2))) > max_residual:
+    rms = float(np.sqrt(np.mean(resid ** 2)))
+    span = float(x[-1] - x[0])
+    if rms > max_residual or abs(slope) * span < min_drift_ratio * rms:
         return 0.0, float(icpt % SPB), len(phases)
     return float(slope), float(icpt % SPB), len(phases)
 

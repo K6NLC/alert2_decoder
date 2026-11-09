@@ -491,6 +491,13 @@ class DiagOutput(PacketOutput):
             # 4800 baud). Only present on packets that came through it.
             if getattr(pkt, 'rate_ppm', None) is not None:
                 snr_str += f' rate={pkt.rate_ppm:+.0f}ppm'
+            # Carrier of the burst, from the I/Q front end. Absolute when
+            # the capture's centre frequency is known (GQRX filename or
+            # --iq-center), otherwise the offset from the tuned centre.
+            if getattr(pkt, 'carrier_hz', None) is not None:
+                c = pkt.carrier_hz
+                snr_str += (f' carrier={c/1e6:.6f}MHz' if abs(c) > 1e6
+                            else f' carrier={c:+.0f}Hz')
             # Capture LEVEL, not quality. alpha is the least-squares symbol
             # amplitude — the scale MER divides out — in raw soft-sample
             # units. Deliberately not normalised to dB against a reference
@@ -1161,6 +1168,18 @@ def packet_to_forwarder_dict(pkt: Alert2Packet) -> dict:
         d['port'] = pkt.mant.port
         d['hop_limit'] = pkt.mant.hop_limit
         d['mant_payload_length'] = pkt.mant.payload_length
+    # Decoded application layer, so a consumer (alert2.aprs, say) never has
+    # to re-parse SRP from the hex. Absent when the payload is not SRP.
+    d['mer_db'] = getattr(pkt, 'mer_db', None)
+    d['carrier_hz'] = getattr(pkt, 'carrier_hz', None)
+    if pkt.srp_pdu is not None:
+        try:
+            from .srp import srp_pdu_to_dict
+            d['srp'] = srp_pdu_to_dict(pkt.srp_pdu)
+        except Exception:
+            d['srp'] = None
+    else:
+        d['srp'] = None
     return d
 
 

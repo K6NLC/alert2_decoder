@@ -123,6 +123,29 @@ def _select_best_copies(packets, mode='best'):
     return [best[k] for k in order]
 
 
+def _drop_shadowed_truncations(packets):
+    """Remove a truncated packet when a COMPLETE packet in the same batch
+    carries it as a byte prefix: it is the same air frame, decoded twice,
+    and the partial copy holds no information the full one lacks.
+
+    Byte-level, so it needs no SRP timestamp (unlike the triple-keyed
+    shadow dedup) and cannot confuse two genuinely different reports.
+    Added after the first --rate-track field day: a rate-corrected first
+    block of a frame whose fixed-grid decode had already completed was
+    emitted as a TRUNCATED line 34 ms behind the complete one."""
+    full = [(p.fec_mode, bytes(p.raw_payload)) for p in packets
+            if not p.truncated]
+    out = []
+    for p in packets:
+        if p.truncated:
+            rp = bytes(p.raw_payload)
+            if any(m == p.fec_mode and len(f) > len(rp) and f.startswith(rp)
+                   for m, f in full):
+                continue
+        out.append(p)
+    return out
+
+
 def _collect_burst_candidates(decoder, bits, soft_samples, amp_est):
     """Detection-stage framesync candidates for the burst pass.
 
@@ -631,7 +654,8 @@ def stream_decode(stream: BinaryIO,
         # first (as rc28 did on this path) threw away the alternative
         # copies before they could be compared, so the primary phase always
         # won regardless of how badly it was timed.
-        chunk_emit = _select_best_copies(chunk_emit, phase_dedup)
+        chunk_emit = _drop_shadowed_truncations(
+            _select_best_copies(chunk_emit, phase_dedup))
 
         _kept = []
         for pkt in chunk_emit:

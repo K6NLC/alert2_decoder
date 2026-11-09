@@ -32,14 +32,13 @@ from alert2.stream import stream_decode
 
 
 def _libfec():
-    import ctypes
-    for name in ("libfec.so.0", "libfec.so"):
-        try:
-            ctypes.CDLL(name)
-            return True
-        except OSError:
-            continue
-    return False
+    # Same search as the decoder itself (honours ALERT2_LIBFEC).
+    from alert2.fec import _load_libfec
+    try:
+        _load_libfec()
+        return True
+    except RuntimeError:
+        return False
 
 
 pytestmark = pytest.mark.skipif(not _libfec(),

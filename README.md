@@ -25,6 +25,9 @@ Built and tested against:
 - **Signal quality metrics** — MER, MER_eq, MER_act, alpha, per-burst timing
 - **Per-burst phase selection** — decode each burst at its own best symbol
   phase rather than at every phase
+- **I/Q input** — raw SDR captures (GQRX, rtl_sdr, SDR++) demodulated here,
+  with a channel survey and per-burst carrier correction; immune to the
+  off-centre-tuning failure of the audio path
 - **Per-burst symbol-rate correction** (`--rate-track`) — recovers frames
   from capture chains whose clock is ~0.1% off (some SDR recordings)
 
@@ -54,6 +57,9 @@ python -m alert2 --stdin \
     --jsonl-file logs/alert2.jsonl \
     --rotate-daily \
     --stats
+
+# Raw SDR I/Q capture (GQRX recorder file; rtl_sdr with --iq-rate/--iq-center):
+alert2-decode gqrx_20261029_052740_171850000_240000_fc.raw --multiphase --phase-candidates 9
 
 # Use as a library:
 python3 -c "from alert2 import decode_wav; print(decode_wav('capture.wav'))"
@@ -155,6 +161,19 @@ quieting (uncalibrated dB, useful for trends and per-source comparison).
 See [docs/OUTPUTS.md](docs/OUTPUTS.md) and
 [docs/SIGNAL_QUALITY.md](docs/SIGNAL_QUALITY.md) for full details.
 
+### Posting to APRS-IS / aprs.fi
+
+`alert2-aprs` listens for the same `--udp-emit` datagrams and posts each
+configured gauge under a tactical callsign with stage telemetry. Sites and
+positions come from a small INI file. See [docs/APRS.md](docs/APRS.md).
+
+### Acting on thresholds
+
+`alert2-actions` fires named blocks of shell commands / HTTP requests
+(Bosch camera recording profiles, notifications, anything) when a site's
+stage crosses configured lines, with hysteresis, debounce and a keyboard
+console for manual control. See [docs/ACTIONS.md](docs/ACTIONS.md).
+
 ### Forwarding to a Campbell-compatible receiver
 
 Use `--udp-emit` together with the separate `alert2_forwarder` program:
@@ -177,7 +196,7 @@ details.
 ## What you need
 
 1. **An FM receiver tuned to your ALERT2 network frequency** — typically in the
-   169–172 MHz VHF band. Either:
+   159–174 MHz VHF band. Either:
    - An **RTL-SDR dongle** (recommended — ~$30, gives the cleanest signal)
    - A **commercial FM radio with discriminator output** (sometimes labeled
      "9600 baud data")
@@ -334,6 +353,9 @@ Bench-test it against a radio you control before using it on a live site.
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Protocol notes](docs/PROTOCOL.md)
 - [Signal quality metrics](docs/SIGNAL_QUALITY.md) — SNR, MER, MER_eq, alpha
+- [Threshold actions](docs/ACTIONS.md) — `alert2-actions`, camera profiles and notifications
+- [APRS-IS emitter](docs/APRS.md) — `alert2-aprs`, gauges on aprs.fi
+- [I/Q input](docs/IQ_INPUT.md) — decoding raw SDR captures, GQRX recording notes
 - [Rate tracking](docs/RATE_TRACK.md) — `--rate-track`, symbol-rate error on SDR captures
 - [Web UI](docs/WEB_UI.md)
 - [Outputs](docs/OUTPUTS.md) — log, diag, CSV, JSONL, UDP formats

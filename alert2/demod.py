@@ -9,7 +9,10 @@ Pipeline per AirLink Spec Figure 1-2:
           -> RRC matched filter -> bit-clock recovery -> bit decisions
 """
 import numpy as np
-import scipy.signal as sig
+try:  # SciPy is optional: the receive path needs only the resampler below,
+    import scipy.signal as sig  # which has a NumPy fallback.
+except ImportError:  # pragma: no cover - exercised by the SciPy-free build
+    sig = None
 from typing import List, Tuple, Optional
 from .constants import (
     BAUD_RATE, RX_SAMPLE_RATE, SAMPLES_PER_BIT, RRC_TAPS,
@@ -26,6 +29,9 @@ def fm_discriminate(audio: np.ndarray, fs: int) -> np.ndarray:
     For a clean signal already at baseband (e.g., from rtl_fm in FM mode),
     this is mostly identity but removes any residual DC.
     """
+    if sig is None:
+        raise RuntimeError("this input option needs SciPy, which is not "
+                           "included in this build")
     # Bandpass to FSK band (preserves all FSK content)
     bp_b, bp_a = sig.butter(6, [400, 4500], btype='band', fs=fs)
     audio_bp = sig.filtfilt(bp_b, bp_a, audio)
@@ -55,7 +61,76 @@ def resample_to_rx_rate(signal: np.ndarray, fs_in: int) -> np.ndarray:
     g = gcd(int(RX_SAMPLE_RATE), int(fs_in))
     up = RX_SAMPLE_RATE // g
     down = int(fs_in) // g
-    return sig.resample_poly(signal, up=up, down=down)
+    if sig is not None and not _FORCE_NUMPY_RESAMPLE:
+        return sig.resample_poly(signal, up=up, down=down)
+    return resample_poly_np(signal, up, down)
+
+
+# Set ALERT2_NUMPY_RESAMPLE=1 to use the NumPy resampler even when SciPy is
+# installed, so a desktop run can be compared with the SciPy-free build.
+import os as _os
+_FORCE_NUMPY_RESAMPLE = _os.environ.get('ALERT2_NUMPY_RESAMPLE') == '1'
+
+
+def _firwin_lowpass_kaiser(numtaps: int, cutoff: float,
+                           beta: float = 5.0) -> np.ndarray:
+    """scipy.signal.firwin(numtaps, cutoff, window=('kaiser', beta)).
+
+    Windowed-sinc low-pass, cutoff relative to Nyquist, scaled to unity
+    gain at DC -- the same design firwin performs for these arguments.
+    """
+    m = np.arange(numtaps) - 0.5 * (numtaps - 1)
+    h = cutoff * np.sinc(cutoff * m)
+    h *= np.kaiser(numtaps, beta)
+    return h / h.sum()
+
+
+def resample_poly_np(x: np.ndarray, up: int, down: int) -> np.ndarray:
+    """NumPy equivalent of scipy.signal.resample_poly(x, up, down) with its
+    defaults (Kaiser beta=5 FIR, half-length 10*max(up, down), zero padding,
+    same output length and alignment). Output dtype follows the input, like
+    SciPy's. Computed in float64, so it agrees with SciPy to within float32
+    rounding.
+    """
+    from math import gcd
+    x = np.asarray(x)
+    out_dtype = x.dtype if x.dtype.kind == 'f' else np.float64
+    g = gcd(int(up), int(down))
+    up, down = int(up) // g, int(down) // g
+    if up == down == 1:
+        return x.astype(out_dtype, copy=True)
+    n_in = x.shape[0]
+    n_out = n_in * up // down + bool(n_in * up % down)
+    max_rate = max(up, down)
+    half_len = 10 * max_rate
+    h = _firwin_lowpass_kaiser(2 * half_len + 1, 1.0 / max_rate) * up
+    n_pre_pad = down - half_len % down
+    n_pre_remove = (half_len + n_pre_pad) // down
+    h = np.concatenate((np.zeros(n_pre_pad), h))
+    # upfirdn: y[m] = sum_k h[k] * xu[m*down - k], xu = x upsampled by `up`
+    # (zeros between samples). Only taps with k = m*down (mod up) see a
+    # non-zero sample, so each output is a short dot product with one
+    # polyphase branch of h.
+    # Outputs m and m+up use the same branch (period `up` in m), and their
+    # input index advances by exactly `down`, so each (branch, tap) pair is
+    # one strided slice of x: O(N) memory, no per-output gathers.
+    n_taps = -(-len(h) // up)  # taps per branch, ceil
+    pad = n_taps + 1
+    xd = np.concatenate((np.zeros(pad), x.astype(np.float64),
+                         np.zeros(pad + down)))
+    y = np.zeros(n_out)
+    for m0 in range(min(up, n_out)):
+        j0 = (n_pre_remove + m0) * down
+        p = j0 % up
+        hp = h[p::up]
+        base0 = (j0 - p) // up + pad        # padded x index of tap 0
+        cnt = len(range(m0, n_out, up))
+        acc = np.zeros(cnt)
+        for i, hk in enumerate(hp):
+            start = base0 - i
+            acc += hk * xd[start:start + (cnt - 1) * down + 1:down]
+        y[m0::up] = acc
+    return y.astype(out_dtype)
 
 
 def matched_filter(baseband: np.ndarray) -> np.ndarray:
@@ -253,6 +328,9 @@ def _hum_highpass(audio: np.ndarray, fs: int, cutoff: float = 300.0) -> np.ndarr
     Applied to raw audio before resampling, so it benefits both the
     fixed-phase (soundcard/discriminator) and FM-discriminator paths.
     """
+    if sig is None:
+        raise RuntimeError("this input option needs SciPy, which is not "
+                           "included in this build")
     if cutoff <= 0 or cutoff >= fs / 2:
         return audio
     b, a = sig.butter(4, cutoff, btype='high', fs=fs)

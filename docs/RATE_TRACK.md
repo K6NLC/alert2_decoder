@@ -24,8 +24,10 @@ For each burst found by the per-burst detector (`burst_detect.py`):
    spanning the preamble and the first block: mean |amplitude| at each of
    the nine phases, parabolic-interpolated to a fraction of a sample.
 2. Unwrap and fit a line. Its slope, in samples per symbol, is the rate
-   error. A fit with RMS residual > 1 sample is rejected (not a clean
-   linear drift) and the burst is left alone.
+   error. The fit is accepted only when it is unmistakably a drift: RMS
+   residual <= 0.5 sample AND total drift over the span >= 8x the
+   residual. Real SDR drift fits at residual 0.07-0.18 with ratio >= 15;
+   the QTH's noise-only bursts reach ratio 4.3 at most.
 3. If |slope| >= `--rate-track-min-slope` (default 0.002 samples/symbol,
    0.022%), re-sample the burst on the grid `start + phase0 + k*(9+slope)`
    by linear interpolation and decode that stream as well. The packet is
@@ -72,3 +74,17 @@ measurable against the decode. The re-sample + decode only happens for
 bursts over the threshold, so on a clean chain the cost is zero. Requires
 `--multiphase` (it needs the matched-filter stream); works with or without
 `--phase-select`.
+
+## Field note, first day (QTH 2026-10-26, rc38)
+
+3438 packets, the rung fired once: a weak burst (MER 8.0 dB, the day's
+minimum) measured a fictitious -738 ppm, and its rate-corrected first
+block was emitted as a TRUNCATED copy of a frame the fixed grid had
+already decoded complete 34 ms earlier. Two fixes in rc39:
+
+- the acceptance test above (rc38 only checked residual <= 1.0 sample);
+- `_drop_shadowed_truncations`: a truncated packet whose bytes are a
+  prefix of a complete packet in the same batch is dropped, whatever
+  path produced it. Byte-level, so it needs no SRP timestamp.
+
+Neither changed the SDR results (5 / 12 / 4) or the QTH capture (82).

@@ -10,7 +10,6 @@ import time
 import logging
 from typing import List, Optional, Iterator
 import numpy as np
-import scipy.io.wavfile as wav
 
 from .candidate_gate import admit as _gate_admit
 from .constants import (
@@ -32,12 +31,22 @@ from .fec import (
     first_block_cc_bits, first_block_cc_bits_padded,
     followon_cc_bits, followon_cc_bits_padded,
 )
-from .iterative import (
-    decode_first_block_iterative, decode_followon_stream_iterative,
-)
-from .iterative_sova import (
-    decode_first_block_sova, decode_followon_stream_sova,
-)
+# The iterative decoders are optional: a receive-only build (e.g. the
+# Android app) ships without them. They are only needed when the decoder is
+# constructed with iterative='demod' or 'sova'; __init__ refuses those modes
+# with a clear error if the module is absent.
+try:
+    from .iterative import (
+        decode_first_block_iterative, decode_followon_stream_iterative,
+    )
+except ImportError:  # pragma: no cover - exercised by the trimmed build
+    decode_first_block_iterative = decode_followon_stream_iterative = None
+try:
+    from .iterative_sova import (
+        decode_first_block_sova, decode_followon_stream_sova,
+    )
+except ImportError:  # pragma: no cover - exercised by the trimmed build
+    decode_first_block_sova = decode_followon_stream_sova = None
 from .types import Alert2Packet, AirLinkHeader, MantHeader
 
 logger = logging.getLogger('alert2')
@@ -488,6 +497,14 @@ class Alert2Decoder:
             raise ValueError(
                 f"iterative must be 'off', 'demod', 'sova', or bool; "
                 f"got {iterative!r}")
+        if self.iterative == 'demod' and decode_first_block_iterative is None:
+            raise RuntimeError(
+                "iterative='demod' requested but alert2.iterative is not "
+                "included in this build")
+        if self.iterative == 'sova' and decode_first_block_sova is None:
+            raise RuntimeError(
+                "iterative='sova' requested but alert2.iterative_sova is not "
+                "included in this build")
         self.output = output  # For stats collection
 
     def _exceeds_correction_gates(self, pkt) -> bool:
@@ -1906,6 +1923,23 @@ class Alert2Decoder:
         return packets
 
 
+def _read_wav(path: str):
+    """(fs, samples) from a WAV file. SciPy when present; otherwise the stdlib
+    wave module (16-bit PCM), for the SciPy-free receive-only build. Kept out
+    of decode_wav so its locals() stay exactly its parameters."""
+    try:
+        import scipy.io.wavfile as wav
+    except ImportError:
+        import wave
+        with wave.open(path, 'rb') as w:
+            fs = w.getframerate()
+            data = np.frombuffer(w.readframes(w.getnframes()), dtype='<i2')
+            if w.getnchannels() > 1:
+                data = data.reshape(-1, w.getnchannels())
+        return fs, data
+    return wav.read(path)
+
+
 def decode_wav(path: str,
                max_framesync_hd: int = 5,
                fec_modes: Optional[List[int]] = None,
@@ -1945,11 +1979,44 @@ def decode_wav(path: str,
     positions derived from demodulator confidence (Phase 1 iterative
     decode). Requires soft_viterbi (no effect without it). Default off.
     """
-    fs, data = wav.read(path)
+    fs, data = _read_wav(path)
     if data.ndim > 1:
         data = data[:, 0]
     audio = data.astype(np.float32) / 32768.0
     logger.info(f"Loaded {path}: {len(audio)} samples at {fs} Hz")
+    return decode_wav_array(**{k: v for k, v in locals().items()
+                               if k not in ('path', 'data')})
+
+
+def decode_wav_array(audio, fs: int,
+               max_framesync_hd: int = 5,
+               fec_modes: Optional[List[int]] = None,
+               try_simple_demod_too: bool = True,
+               try_inverted_polarity: bool = True,
+               soft_viterbi: bool = False,
+               soft_framesync: bool = False,
+               soft_framesync_threshold: float = 0.62,
+               iterative: bool = False,
+               max_erasures: Optional[int] = None,
+               max_rs_corr: Optional[int] = None,
+               sova_max_fs_hd: Optional[int] = None,
+               sova_max_rs_corr: Optional[int] = None,
+               sova_max_rs_corr_per_block: Optional[int] = None,
+               eq_retry: bool = False,
+               presync_eq: bool = False,
+               presync_max_fs_hd: Optional[int] = None,
+               mer_mode: str = 'full',
+               mer_sample: int = 1,
+               timing_probe: bool = False,
+               hum_filter: bool = False,
+               hum_cutoff: float = 300.0,
+               multiphase: bool = False,
+               phase_candidates: int = 3,
+               rate_track: bool = False,
+               rate_track_min_slope: float = 0.002) -> List[Alert2Packet]:
+    """Decode all packets from an in-memory mono float audio array.
+    Same options and behaviour as decode_wav (which calls this).
+    """
 
     decoder = Alert2Decoder(max_framesync_hd=max_framesync_hd,
                             fec_modes=fec_modes,

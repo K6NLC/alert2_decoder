@@ -29,12 +29,12 @@ the decoder runs on a Pi, you can either SSH-tunnel or bind to your LAN:
 
 ```bash
 # SSH tunnel (recommended): from your laptop, forward Pi's port to your laptop
-ssh -L 8080:localhost:8080 nick@k6nlc-pi
+ssh -L 8080:localhost:8080 pi@alert2-pi
 # Then open http://localhost:8080 on your laptop
 
 # OR bind to LAN directly (anyone on your network can see the data)
 python -m alert2 --stdin --web-ui --web-ui-bind 0.0.0.0
-# Then open http://k6nlc-pi.local:8080 from any device on your LAN
+# Then open http://alert2-pi.local:8080 from any device on your LAN
 ```
 
 The data isn't sensitive (it's hydrology sensor readings), but binding

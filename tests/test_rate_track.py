@@ -145,3 +145,43 @@ def test_decode_wav_rate_track_flag(tmp_path):
     full = [p for p in rt if p.application_payload == app
             and not p.truncated]
     assert len(full) == 1 and full[0].decode_path == 'rate-track'
+
+
+# ---------------------------------------------------------------------------
+# Field regressions from the first --rate-track day (QTH 2026-10-26)
+# ---------------------------------------------------------------------------
+
+def test_noisy_phase_fit_is_rejected():
+    """A fit that is mostly scatter must not yield a slope, however large
+    the least-squares line comes out. Reconstructs the -738 ppm case:
+    12 window phases with ~0.6 sample RMS noise and no real drift."""
+    from alert2 import rate_track as RT
+    rng = np.random.default_rng(7)
+    # synthesise a filtered stream whose best phase wobbles randomly
+    n_sym = 80 + 656 + 40
+    t = np.arange(n_sym * SPB)
+    sym = np.repeat(rng.choice([-1.0, 1.0], n_sym), SPB)
+    # jitter: shift every 60-symbol window by a random fraction of a sample
+    filt = np.empty_like(sym)
+    for k in range(0, n_sym, 60):
+        a, b = k * SPB, min((k + 60) * SPB, len(sym))
+        shift = rng.normal(0, 0.6)
+        filt[a:b] = np.interp(np.arange(a, b) + shift, t, sym)
+    slope, _ph, n = RT.estimate_slope(filt, 0)
+    assert n == 12
+    assert slope == 0.0
+
+
+def test_truncated_copy_is_dropped_when_complete_copy_present():
+    from alert2.stream import _drop_shadowed_truncations
+    from alert2.types import Alert2Packet
+    full = bytes(range(40))
+    a = Alert2Packet(fec_mode=0, raw_payload=full, truncated=False)
+    b = Alert2Packet(fec_mode=0, raw_payload=full[:20], truncated=True)
+    c = Alert2Packet(fec_mode=0, raw_payload=bytes(range(50, 70)),
+                     truncated=True)                 # a different frame
+    d = Alert2Packet(fec_mode=1, raw_payload=full[:20], truncated=True)
+    kept = _drop_shadowed_truncations([a, b, c, d])
+    assert kept == [a, c, d]
+    # a lone truncation is an honest partial and stays
+    assert _drop_shadowed_truncations([b]) == [b]

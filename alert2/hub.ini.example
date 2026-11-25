@@ -1,0 +1,48 @@
+; alert2-hub configuration — copy to hub.ini and edit.
+;   alert2-hub --config hub.ini --check     validate, list sites and outputs
+;   alert2-hub --config hub.ini             run
+; Each receive site's decoder points at the hub:
+;   alert2-decode ... --site-name qth  --link HUBHOST:9990
+;   alert2-decode ... --site-name shop --link HUBHOST:9990
+; (a decoder on the hub machine itself uses --link 127.0.0.1:9990)
+
+[hub]
+listen       = 0.0.0.0:9990       ; TCP, from the sites. Bind to the VPN address if you have one.
+hold         = 2.0                ; seconds a frame waits for the other sites' copies before merging
+dedup_window = 30                 ; a copy whose receive time is within this of a merged frame is "late", not new
+; key        = some-long-secret   ; or ALERT2_LINK_KEY; sites then need --link-key / the same variable
+strict_sites = no                 ; yes = drop packets from sites not listed below
+log_file     = alert2-hub.log     ; one line per merged frame: who heard it, MER per site, who won
+stats_file   = alert2-hub.stats.json
+stats_interval = 300
+
+; ---- sites ---------------------------------------------------------------
+; add_path = the ALERT2 source address assigned to this receive point. Only
+; set it to an address from the network's address plan. Used on outputs with
+; add_path = yes; leave it out and that site's frames pass through unchanged.
+
+[site qth]
+; add_path = 4690
+
+[site shop]
+; add_path = 4691
+
+; ---- outputs: UDP, same JSON the decoder's --udp-emit sends -------------
+; mode = merged    one copy per air frame (best site), tagged site + heard_by
+; mode = separate  every site's copy as it arrives, tagged site
+; add_path = yes   append the receiving site's address to the MANT path, as a
+;                  repeater would — only when the frame requests Add Path.
+;                  The original bytes stay in raw_payload_original_hex.
+
+[output campbell]
+to       = 127.0.0.1:9999         ; alert2_forwarder
+mode     = separate               ; base software de-dupes; each copy shows its receive point
+add_path = yes
+
+[output aprs]
+to   = 127.0.0.1:9998             ; alert2-aprs
+mode = merged
+
+[output actions]
+to   = 127.0.0.1:9997             ; alert2-actions
+mode = merged

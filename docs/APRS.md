@@ -74,7 +74,12 @@ AL2735>APZA2T,TCPIP*::AL2735   :BITS.00000000,Arroyo Grande Ck at Hwy 1
 ```
 
 - The position packet's `DDHHMMz` is the **SRP report time**, resolved
-  from the ALERT2 "seconds since 12:00 UTC" field, not the receive time.
+  from the ALERT2 timestamp (seconds since 12:00 AM or PM UTC, whichever
+  is more recent), not the receive time. Through rc48 this was resolved
+  from noon only, which stamped every report received between 00:00 and
+  12:00 UTC twelve hours early; fixed in rc49 and checked against
+  117,584 timestamped reports from an AL205R (all within 5 minutes of
+  the IND's receive time).
   A relayed copy of the same report via another repeater path is
   recognised by that time and not posted twice.
 - Telemetry channels are fixed: 1 Stage, 2 Battery, 3 MER, 4 Rain1h,

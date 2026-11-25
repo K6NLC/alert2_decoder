@@ -19,8 +19,9 @@ Design points
   operator's own login. Telemetry is attributed to the from-call, which is
   what makes aprs.fi graph each site separately. The login call never
   appears in the packets except in the q-construct the server adds.
-* Position packet `/DDHHMMz...` carries the SRP report time, not receive
-  time, so a relayed copy a few seconds later is the same report.
+* Position packet `/DDHHMMz...` carries the SRP report time (12-hour
+  rollover resolved against receive time), not receive time, so a
+  relayed copy a few seconds later is the same report.
 * Telemetry `T#sss,a1..a5,bits` with PARM/UNIT/EQNS/BITS definition
   messages sent at start and every `defs_every` frames. Analog channels
   are 0-255 by spec; the EQNS line maps them back to engineering units,
@@ -175,17 +176,24 @@ def aprs_lon(lon: float) -> str:
 
 
 def report_time(rx_time: float, srp_ts: Optional[int]) -> float:
-    """Absolute UTC time of an SRP report. The SRP timestamp is seconds
-    since the most recent 12:00 UTC; resolve it against the receive time,
-    allowing a report to be a little 'ahead' of a slow clock."""
+    """Absolute UTC time of an SRP report.
+
+    The SRP timestamp is the seconds elapsed since 12:00 AM or 12:00 PM
+    UTC, whichever is more recent (Application Layer spec 2.1.2), so it
+    rolls over every 12 hours. Resolve it against the receive time: the
+    most recent half-day boundary, stepping back one half-day if that
+    would put the report in the future (a report stamped just before a
+    boundary and received just after it; 15 min of clock slack allowed).
+
+    Before rc49 this assumed a 24-hour rollover from noon, which put
+    every report received between 00:00 and 12:00 UTC twelve hours early.
+    """
     if srp_ts is None:
         return rx_time
-    noon = (int(rx_time) // 86400) * 86400 + 43200
-    if noon > rx_time:
-        noon -= 86400
-    t = noon + srp_ts
+    base = (int(rx_time) // 43200) * 43200
+    t = base + srp_ts
     if t > rx_time + 900:
-        t -= 86400
+        t -= 43200
     return t
 
 

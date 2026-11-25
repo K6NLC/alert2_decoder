@@ -238,7 +238,7 @@ class SrpPdu:
     test_flag: bool = False
     pdu_id: int = 7  # 7 = disabled/default
     extensibility: bool = False
-    timestamp: Optional[int] = None  # Seconds since most recent 12:00 UTC
+    timestamp: Optional[int] = None  # Seconds since most recent 12:00 AM or PM UTC (12 h rollover)
     reports: List[Any] = field(default_factory=list)
     parse_errors: List[str] = field(default_factory=list)
     raw_bytes: bytes = b''

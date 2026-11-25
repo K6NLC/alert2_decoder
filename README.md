@@ -167,6 +167,21 @@ See [docs/OUTPUTS.md](docs/OUTPUTS.md) and
 configured gauge under a tactical callsign with stage telemetry. Sites and
 positions come from a small INI file. See [docs/APRS.md](docs/APRS.md).
 
+### Linking receive sites
+
+`alert2-hub` merges the decoded streams of two or more sites
+(`--site-name NAME --link HUB:PORT` on each decoder) into one, keeps
+per-site recall and MER statistics, and can append each receive point's
+address to the MANT path for the base software. See
+[docs/HUB.md](docs/HUB.md).
+
+### Feeding from a commercial receiver
+
+`alert2-indapi` reads the ASCII output of an AL205R or A2X (TCP, serial
+or a log file) and emits the same packets the decoder does, so an IND
+can drive `alert2-actions`, `alert2-aprs` or join `alert2-hub` as a site.
+See [docs/INDAPI.md](docs/INDAPI.md).
+
 ### Acting on thresholds
 
 `alert2-actions` fires named blocks of shell commands / HTTP requests
@@ -353,6 +368,8 @@ Bench-test it against a radio you control before using it on a live site.
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Protocol notes](docs/PROTOCOL.md)
 - [Signal quality metrics](docs/SIGNAL_QUALITY.md) — SNR, MER, MER_eq, alpha
+- [IND input](docs/INDAPI.md) — `alert2-indapi`, AL205R/A2X ASCII output
+- [Site hub](docs/HUB.md) — `alert2-hub`, linking receive sites, Add Path
 - [Threshold actions](docs/ACTIONS.md) — `alert2-actions`, camera profiles and notifications
 - [APRS-IS emitter](docs/APRS.md) — `alert2-aprs`, gauges on aprs.fi
 - [I/Q input](docs/IQ_INPUT.md) — decoding raw SDR captures, GQRX recording notes

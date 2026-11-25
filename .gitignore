@@ -41,3 +41,4 @@ actions.ini
 *.ini
 !*.ini.example
 *.state
+*.stats.json

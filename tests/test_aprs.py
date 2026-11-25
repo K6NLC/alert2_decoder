@@ -70,21 +70,18 @@ def test_position_formatting():
     assert aprs.aprs_lon(170.9217) == '17055.30E'
 
 
-def test_report_time_resolves_against_noon_utc():
+def test_report_time_resolves_against_half_day_utc():
     # 2026-10-26 18:09:04 PDT = 2026-10-27 01:09:04 UTC; SRP ts 4115 s after
-    # the most recent 12:00 UTC (2026-10-26 12:00Z) -> 13:08:35Z
+    # the most recent 12:00 AM/PM UTC (2026-10-27 00:00Z) -> 01:08:35Z
     import calendar
     rx = calendar.timegm(time.strptime('2026-10-27 01:09:04',
                                        '%Y-%m-%d %H:%M:%S'))
     t = aprs.report_time(rx, 4115)
     assert time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(t)) == \
-        '2026-10-26 13:08:35'
+        '2026-10-27 01:08:35'
     # just after noon with a report stamped 'ahead' of a slow rx clock
     rx2 = rx - 3600 * 13 + 60          # 12:10:04Z on the 26th
     assert aprs.report_time(rx2, 700) == rx2 + 96      # 12:11:40Z
-    # a report stamped the previous afternoon, received just after noon
-    assert time.strftime('%d %H:%M', time.gmtime(aprs.report_time(rx2, 80000))) \
-        == '26 10:13'
     assert aprs.report_time(rx, None) == rx
 
 

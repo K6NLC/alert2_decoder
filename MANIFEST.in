@@ -8,6 +8,9 @@ include aprs.ini.example
 include alert2/aprs.ini.example
 include actions.ini.example
 include alert2/actions.ini.example
+include hub.ini.example
+include alert2/hub.ini.example
+include tests/data_al205_tcp_stream.txt
 include NOTICE.md
 include REUSE.toml
 recursive-include LICENSES *.txt

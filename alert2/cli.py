@@ -134,6 +134,27 @@ def build_outputs(args):
             outputs.append(UdpEmitOutput(host, port))
             print(f"UDP emit to {host}:{port}", file=sys.stderr)
 
+    # TCP link(s) to an alert2-hub that merges several receive sites.
+    if getattr(args, 'link', None):
+        from .link import LinkOutput
+        import os as _os
+        key = args.link_key or _os.environ.get('ALERT2_LINK_KEY') or None
+        if not args.site_name:
+            print("ERROR: --link needs --site-name", file=sys.stderr)
+            sys.exit(1)
+        for spec in args.link:
+            try:
+                host, port_str = spec.rsplit(':', 1)
+                port = int(port_str)
+            except (ValueError, AttributeError):
+                print(f"ERROR: --link value '{spec}' must be HOST:PORT",
+                      file=sys.stderr)
+                sys.exit(1)
+            outputs.append(LinkOutput(host or '127.0.0.1', port,
+                                      args.site_name, key))
+            print(f"Hub link to {host}:{port} as site '{args.site_name}'"
+                  f"{' (signed)' if key else ''}", file=sys.stderr)
+
     # Stats always collected (cheap). They print to stderr at session end
     # unless --no-stats is given. Optionally also write JSON file.
     if not args.no_stats or args.stats_file:
@@ -250,6 +271,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--diag-file',
                         help='Path for the diagnostic log (implies --diag-mode). '
                              'Default if --diag-mode alone: alert2.diag')
+    parser.add_argument('--site-name', metavar='NAME',
+                        help='Name of this receive site (e.g. qth, shop). '
+                             'Required with --link; tags every packet sent '
+                             'to the hub.')
+    parser.add_argument('--link', metavar='HOST:PORT', action='append',
+                        help='Send every decoded packet to an alert2-hub '
+                             'over TCP (reconnects, spools while the hub is '
+                             'unreachable). Repeatable.')
+    parser.add_argument('--link-key', metavar='KEY', default=None,
+                        help='Shared key: sign each packet (HMAC-SHA256) so '
+                             'the hub can reject other senders. Or set '
+                             'ALERT2_LINK_KEY.')
     parser.add_argument('--udp-emit', metavar='HOST:PORT', action='append',
                         help='Send each decoded packet as a JSON datagram to '
                              'this UDP endpoint; repeat for several consumers '

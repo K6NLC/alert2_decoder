@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.9.1rc50 — IND feed (AL205R / A2X)
+
+- **`alert2-indapi`** — reads the ASCII output of a commercial ALERT2 IND
+  (Campbell AL205R, Blue Water A2X) over TCP (listen or connect), serial
+  or a log file, and re-emits each PDU as this project's packet datagram,
+  so the IND can drive `alert2-actions`, `alert2-aprs` and `alert2-hub`;
+  in the hub it is another site, scored against the software decoders.
+  `--verify` checks that the N records rebuild the P record's bytes.
+  See `docs/INDAPI.md`.
+
+## v0.9.1rc49 — SRP timestamp rollover fix
+
+- **Fix:** the SRP report timestamp rolls over every 12 hours (seconds
+  since 12:00 AM or PM UTC, Application Layer spec 2.1.2). Earlier
+  versions assumed a 24-hour rollover from noon, which placed every report
+  received between 00:00 and 12:00 UTC twelve hours early (affects
+  `alert2-aprs` position times).
+
+## v0.9.1rc48 — site hub
+
+- **`alert2-hub`** — merges the decoded streams of two or more receive
+  sites into one: recognises the same air frame from each site, keeps the
+  best copy, and re-emits the decoder's `--udp-emit` JSON (merged or
+  per-site) to the Campbell forwarder, `alert2-aprs` and `alert2-actions`.
+  Keeps per-site recall and MER statistics, and can append each receive
+  point's address to the MANT path (Add Path). See `docs/HUB.md`.
+- **Decoder:** `--site-name NAME --link HOST:PORT` sends every packet to
+  the hub over TCP (reconnects, spools while the hub is unreachable).
+  `--link-key` / `ALERT2_LINK_KEY` signs each packet with HMAC-SHA256.
+- `hub.ini` is git-ignored; only `hub.ini.example` is in the repository.
+
 ## v0.9.1rc47 — actions, timers, APRS, I/Q input
 
 New tools and inputs since the first public release (rc38). Detailed
